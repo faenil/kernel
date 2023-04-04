@@ -3814,11 +3814,13 @@ static int fastrpc_get_spd_session(char *name, int *session, int *cid)
 	struct fastrpc_apps *me = &gfa;
 	int err = 0, i, j, match = 0;
 
+	pr_info("fastrpc_get_spd_session name %s session %d cid %d\n", name, *session, *cid);
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		for (j = 0; j < NUM_SESSIONS; j++) {
 			if (!me->channel[i].spd[j].servloc_name)
 				continue;
 			if (!strcmp(name, me->channel[i].spd[j].servloc_name)) {
+				pr_info("match found at idx %d \n");
 				match = 1;
 				break;
 			}
@@ -3826,14 +3828,17 @@ static int fastrpc_get_spd_session(char *name, int *session, int *cid)
 		if (match)
 			break;
 	}
+	pr_info("fastrpc_get_spd_session after session lookup, err %d\n", err);
 	VERIFY(err, i < NUM_CHANNELS && j < NUM_SESSIONS);
 	if (err) {
+		pr_info("fastrpc_get_spd_session after session lookup, bailing out with err %d\n", err);
 		err = -EUSERS;
 		goto bail;
 	}
 	*cid = i;
 	*session = j;
 bail:
+	pr_info("fastrpc_get_spd_session, bailing out with err %d\n", err);
 	return err;
 }
 
@@ -4256,21 +4261,27 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	int cid = fl->cid;
 	struct fastrpc_apps *me = &gfa;
 	struct fastrpc_channel_ctx *chan = NULL;
+	pr_info("fastrpc_init_process start\n");
 
 	VERIFY(err, init->filelen < INIT_FILELEN_MAX
 			&& init->memlen < INIT_MEMLEN_MAX);
-	if (err)
+	if (err) {
+		pr_info("fastrpc_init_process filelen memlen verification failed\n");
 		goto bail;
+	}
 	if (err) {
 		ADSPRPC_ERR(
 			"file size 0x%x or init memory 0x%x is more than max allowed file size 0x%x or init len 0x%x\n",
 			init->filelen, init->memlen,
 			INIT_FILELEN_MAX, INIT_MEMLEN_MAX);
 		err = -EFBIG;
+		pr_info("fastrpc_init_process file size 0x%x or init memory 0x%x is more than max allowed file size 0x%x or init len 0x%x\n",init->filelen, init->memlen,INIT_FILELEN_MAX, INIT_MEMLEN_MAX);
+
 		goto bail;
 	}
 	VERIFY(err, VALID_FASTRPC_CID(cid));
 	if (err) {
+		pr_info("fastrpc_init_process invalid cid\n");
 		err = -ECHRNG;
 		goto bail;
 	}
@@ -4281,37 +4292,48 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		/* channel configured as secure. */
 		if (chan->secure && !(fl->is_unsigned_pd)) {
 			err = -ECONNREFUSED;
+			pr_info("fastrpc_init_process 3rd party trying to spawn signed pd\n");
 			goto bail;
 		}
 	}
 
 	err = fastrpc_channel_open(fl);
-	if (err)
+	if (err) {
+		pr_info("fastrpc_init_process channel open failed\n");
 		goto bail;
-
+	}
 	fl->proc_flags = init->flags;
 	switch (init->flags) {
 	case FASTRPC_INIT_ATTACH:
 	case FASTRPC_INIT_ATTACH_SENSORS:
+		pr_info("fastrpc_init_process attaching process\n");
 		err = fastrpc_init_attach_process(fl, init);
 		break;
 	case FASTRPC_INIT_CREATE:
+		pr_info("fastrpc_init_process creating dynamic process\n");
 		err = fastrpc_init_create_dynamic_process(fl, uproc);
 		break;
 	case FASTRPC_INIT_CREATE_STATIC:
+		pr_info("fastrpc_init_process creating static process\n");
 		err = fastrpc_init_create_static_process(fl, init);
 		break;
 	default:
+		pr_info("fastrpc_init_process default flags case\n");
 		err = -ENOTTY;
 		break;
 	}
-	if (err)
+	if (err) {
+		pr_info("fastrpc_init_process error after switch %d\n", err);
 		goto bail;
+    }
 	fl->dsp_proc_init = 1;
 	VERIFY(err, 0 == (err = fastrpc_device_create(fl)));
-	if (err)
+	if (err) {
+	    pr_info("fastrpc_init_process error creating device\n");
 		goto bail;
+    }
 bail:
+	pr_info("fastrpc_init_process: bailing out with err %d\n", err);
 	return err;
 }
 
@@ -5206,6 +5228,8 @@ static int fastrpc_internal_mmap(struct fastrpc_file *fl,
 	uintptr_t raddr = 0;
 	int err = 0;
 
+	pr_info("mmap request: fd %d flags %u vaddrin 0x%llx size %zu vaddrout %llx\n", ud->fd, ud->flags, ud->vaddrin, ud->size, ud->vaddrout);
+
 	VERIFY(err, fl->dsp_proc_init == 1);
 	if (err) {
 		ADSPRPC_ERR(
@@ -5231,12 +5255,16 @@ static int fastrpc_internal_mmap(struct fastrpc_file *fl,
 			dma_attr |= DMA_ATTR_SYS_CACHE_ONLY;
 		err = fastrpc_buf_alloc(fl, ud->size, dma_attr, ud->flags,
 						USERHEAP_BUF, &rbuf);
-		if (err)
+		if (err) {
+			pr_info("Error fastrpc_buf_alloc\n");
 			goto bail;
+		}
 		err = fastrpc_mmap_on_dsp(fl, ud->flags, 0,
 				rbuf->phys, rbuf->size, &raddr);
-		if (err)
+		if (err) {
+			pr_info("Error fastrpc_mmap_on_dsp\n");
 			goto bail;
+		}
 		rbuf->raddr = raddr;
 	} else {
 		uintptr_t va_to_dsp;
@@ -5246,8 +5274,10 @@ static int fastrpc_internal_mmap(struct fastrpc_file *fl,
 				(uintptr_t)ud->vaddrin, ud->size,
 				 ud->flags, &map)));
 		mutex_unlock(&fl->map_mutex);
-		if (err)
+		if (err) {
+			pr_info("Error fastrpc_mmap_create second\n");
 			goto bail;
+        }
 
 		if (ud->flags == ADSP_MMAP_HEAP_ADDR ||
 				ud->flags == ADSP_MMAP_REMOTE_HEAP_ADDR)
@@ -5256,8 +5286,10 @@ static int fastrpc_internal_mmap(struct fastrpc_file *fl,
 			va_to_dsp = (uintptr_t)map->va;
 		VERIFY(err, 0 == (err = fastrpc_mmap_on_dsp(fl, ud->flags,
 			va_to_dsp, map->phys, map->size, &raddr)));
-		if (err)
+		if (err) {
+			pr_info("Error fastrpc_mmap_on_dsp second\n");
 			goto bail;
+        }
 		map->raddr = raddr;
 	}
 	ud->vaddrout = raddr;
@@ -5351,12 +5383,16 @@ static int fastrpc_rpmsg_probe(struct rpmsg_device *rpdev)
 	cid = get_cid_from_rpdev(rpdev);
 	VERIFY(err, VALID_FASTRPC_CID(cid));
 	if (err) {
+		pr_info("fastrpc_rpmsg_probe failing with %d\n", err);
 		err = -ECHRNG;
 		goto bail;
 	}
 	mutex_lock(&gcinfo[cid].rpmsg_mutex);
 	gcinfo[cid].rpdev = rpdev;
 	mutex_unlock(&gcinfo[cid].rpmsg_mutex);
+
+	pr_info("opened rpmsg channel for %s, name %s\n",
+		gcinfo[cid].subsys, rpdev->dev.parent->of_node->name);
 	ADSPRPC_INFO("opened rpmsg channel for %s\n",
 		gcinfo[cid].subsys);
 bail:
@@ -5866,9 +5902,11 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 {
 	struct fastrpc_apps *me = &gfa;
 	int cid = -1, err = 0;
+	pr_info("fastrpc_channel_open start\n");
 
 	VERIFY(err, fl && fl->sctx && fl->cid >= 0 && fl->cid < NUM_CHANNELS);
 	if (err) {
+		pr_info("fastrpc_channel_open error verifying channels num\n", err);
 		ADSPRPC_ERR("kernel session not initialized yet for %s\n",
 			current->comm);
 		err = -EBADR;
@@ -5881,6 +5919,8 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 	if (err) {
 		err = -ENODEV;
 		mutex_unlock(&me->channel[cid].rpmsg_mutex);
+		pr_info("fastrpc_channel_open failed %s\n", me->channel[cid].subsys);
+
 		goto bail;
 	}
 	mutex_unlock(&me->channel[cid].rpmsg_mutex);
@@ -5891,6 +5931,7 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 		if (!me->channel[cid].issubsystemup) {
 			err = -ECONNREFUSED;
 			mutex_unlock(&me->channel[cid].smd_mutex);
+			pr_info("fastrpc_channel_open refusing connection, subsystem is down\n");
 			goto bail;
 		}
 	}
@@ -5901,10 +5942,14 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 		mutex_lock(&fl->map_mutex);
 		err = fastrpc_mmap_remove_ssr(fl, 1);
 		mutex_unlock(&fl->map_mutex);
-		if (err)
+		if (err) {
+			pr_info("failed to unmap remote heap for %s (err %d)\n",
+                                me->channel[cid].subsys, err);
+
 			ADSPRPC_WARN(
 				"failed to unmap remote heap for %s (err %d)\n",
 				me->channel[cid].subsys, err);
+		}
 		me->channel[cid].prevssrcount =
 					me->channel[cid].ssrcount;
 	}
@@ -6320,14 +6365,18 @@ static int fastrpc_check_pd_status(struct fastrpc_file *fl, char *sloc_name)
 	if (fl->servloc_name && sloc_name
 		&& !strcmp(fl->servloc_name, sloc_name)) {
 		err = fastrpc_get_spd_session(sloc_name, &session, &cid);
-		if (err || cid != fl->cid)
+		if (err || cid != fl->cid) {
+			pr_info("fastrpc_check_pd_status bailing out, error getting session\n");
 			goto bail;
+                }
 		if (!me->channel[cid].spd[session].ispdup) {
 			err = -ENOTCONN;
+			pr_info("fastrpc_check_pd_status bailing out, pd is down\n");
 			goto bail;
 		}
 	}
 bail:
+	pr_info("fastrpc_check_pd_status bailing out: err %d\n", err);
 	return err;
 }
 
@@ -6476,12 +6525,15 @@ static inline int fastrpc_mmap_device_ioctl(struct fastrpc_file *fl,
 		K_COPY_FROM_USER(err, 0, &p->mmap, param,
 						sizeof(p->mmap));
 		if (err) {
+			pr_info("Copied mmap param failed");
 			err = -EFAULT;
 			goto bail;
 		}
 		VERIFY(err, 0 == (err = fastrpc_internal_mmap(fl, &p->mmap)));
-		if (err)
+		if (err) {
+			pr_info("fastrpc_internal_mmap failed %d", err);
 			goto bail;
+                }
 		K_COPY_TO_USER(err, 0, param, &p->mmap, sizeof(p->mmap));
 		if (err) {
 			err = -EFAULT;
@@ -6568,6 +6620,7 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 	p.inv.perf_dsp = NULL;
 	p.inv.job = NULL;
 
+	pr_info("ioctl ioctl num %u %lu mmap ioctl %d\n", ioctl_num, ioctl_param, FASTRPC_IOCTL_MMAP);
 	err = fastrpc_check_pd_status(fl,
 			AUDIO_PDR_SERVICE_LOCATION_CLIENT_NAME);
 	if (err)
@@ -6655,6 +6708,7 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 		K_COPY_FROM_USER(err, 0, &p.init, param, size);
 		if (err) {
 			err = -EFAULT;
+			pr_info("FASTRPC_IOCTL_INIT_ATTRS failed %d\n", err);
 			goto bail;
 		}
 		VERIFY(err, 0 == (err = fastrpc_init_process(fl, &p.init)));

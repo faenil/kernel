@@ -1367,6 +1367,9 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	unsigned long flags, thread_mask = 0;
 	int ret, nested, shared = 0;
 
+	if (irq == 408)
+		pr_info("REQUEST IRQ 408 FLAGS %08x\n", new->flags);
+
 	if (!desc)
 		return -EINVAL;
 
